@@ -16,7 +16,7 @@ def generate_planning_problem(width, height, num_obs, min_size, max_size):
     obs_sizes = np.random.randint(min_size, max_size, (num_obs,2))
     obs_upper_corners = obs_lower_corners + obs_sizes
     obstacles = zip(obs_lower_corners, obs_upper_corners)
-    occupancy = DetOccupancyGrid2D(width, height, obstacles)
+    occupancy = DetOccupancyGrid2D(width, height, list(obstacles))
 
     x_init = tuple(np.random.randint(0, width-x_margin, 2).tolist())
     while not occupancy.is_free(x_init):

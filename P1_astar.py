@@ -15,7 +15,7 @@ class AStar(object):
         self.x_goal = self.snap_to_grid(x_goal)    # goal state
 
         self.closed_set = set()    # the set containing the states that have been visited
-        self.open_set = set()      # the set containing the states that are condidate for future expension
+        self.open_set = set()      # the set containing the states that are candidate for future expension
 
         self.est_cost_through = {}  # dictionary of the estimated cost from start to goal passing through state (often called f score)
         self.cost_to_arrive = {}    # dictionary of the cost-to-arrive at state from start (often called g score)
@@ -37,7 +37,21 @@ class AStar(object):
             Boolean True/False
         """
         ########## Code starts here ##########
-        
+        # first check if inside the bounds of the map
+        # check lower
+        if x[0] < self.statespace_lo[0] or x[1] < self.statespace_lo[1]:
+            return False
+
+        # check upper
+        if x[0] > self.statespace_hi[0] or x[1] > self.statespace_hi[1]:
+            return False
+
+        # then check if the point is free
+        if not self.occupancy.is_free(x):
+            return False
+
+        # if we haven't returned false yet, then the point is free
+        return True
         ########## Code ends here ##########
 
     def distance(self, x1, x2):
@@ -52,7 +66,7 @@ class AStar(object):
         HINT: This should take one line.
         """
         ########## Code starts here ##########
-        
+        return np.sqrt((x1[0] - x2[0])**2 + (x1[1] - x2[1])**2)
         ########## Code ends here ##########
 
     def snap_to_grid(self, x):
@@ -85,7 +99,17 @@ class AStar(object):
         """
         neighbors = []
         ########## Code starts here ##########
-        
+        # create a list of scaling factors that result in possible neighbors
+        scaling = [(1,0), (1,1), (0,1), (-1,1), (-1,0), (-1,-1), (0,-1), (1,-1)]
+
+        # iterate through scaling factors to create each neighbor
+        for scale in scaling:
+            possible_neighbor = self.snap_to_grid((x[0] + scale[0] * self.resolution, x[1] + scale[1] * self.resolution))
+
+            # now check if that neighbor is free
+            if self.is_free(possible_neighbor):
+                neighbors.append(possible_neighbor)
+
         ########## Code ends here ##########
         return neighbors
 
@@ -112,10 +136,10 @@ class AStar(object):
 
     def plot_path(self, fig_num=0):
         """Plots the path found in self.path and the obstacles"""
+        self.occupancy.plot(fig_num)
+
         if not self.path:
             return
-
-        self.occupancy.plot(fig_num)
 
         solution_path = np.array(self.path) * self.resolution
         plt.plot(solution_path[:,0],solution_path[:,1], color="green", linewidth=2, label="A* solution path", zorder=10)
@@ -149,7 +173,50 @@ class AStar(object):
                 set membership efficiently using the syntax "if item in set".
         """
         ########## Code starts here ##########
-        
+        # iterate through the open set while there are states in the set
+        while len(self.open_set) > 0:
+            # get the state with the lowest cost_through in the open set
+            x_curr = self.find_best_est_cost_through()
+
+            # first check if this point is the goal state
+            if x_curr == self.x_goal:
+                # reconstruct the path and return
+                self.path = self.reconstruct_path()
+                return True
+
+            # remove the current state from the open set and place it in the closed set
+            self.open_set.remove(x_curr)
+            self.closed_set.add(x_curr)
+
+            # now loop through all neighbors
+            neighbors = self.get_neighbors(x_curr)
+            for x_neighbor in neighbors:
+                # first check if the neighbor is already in the closed set
+                if x_neighbor in self.closed_set:
+                    # if yes, skip this neighbor
+                    continue
+
+                # get the cost to arrive for the given neighbor
+                tent_cost_to_arrive = self.cost_to_arrive[x_curr] + self.distance(x_curr, x_neighbor)
+
+                # add x_neighbor to the open set if not already there
+                if x_neighbor not in self.open_set:
+                    self.open_set.add(x_neighbor)
+                # otherwise check if we've found a shorter path to this neighbor already
+                elif tent_cost_to_arrive > self.cost_to_arrive[x_neighbor]:
+                    continue
+
+                # update the came_from dict to show path between neighbor and current
+                self.came_from[x_neighbor] = x_curr
+
+                # set the cost to arrive to this neighbor
+                self.cost_to_arrive[x_neighbor] = tent_cost_to_arrive
+
+                # set the cost to go to goal
+                self.est_cost_through[x_neighbor] = tent_cost_to_arrive + self.distance(x_neighbor, self.x_goal)
+
+        # return false if no path was found
+        return False
         ########## Code ends here ##########
 
 class DetOccupancyGrid2D(object):
@@ -185,3 +252,4 @@ class DetOccupancyGrid2D(object):
             obs[1][0]-obs[0][0],
             obs[1][1]-obs[0][1],))
         ax.set(xlim=(0,self.width), ylim=(0,self.height))
+
