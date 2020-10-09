@@ -104,7 +104,57 @@ class RRT(object):
         #     are meaningful! keep this in mind when using the helper functions!
 
         ########## Code starts here ##########
-        
+        # start iterations
+        for k in range(max_iters):
+            # get a sampling probability
+            z = np.random.uniform(0, 1)
+
+            # check for goal bias
+            if z < goal_bias:
+                x_rand = self.x_goal
+            else:
+                # create x rand depending on state_dim
+                x_rand = np.array([np.random.uniform(self.statespace_lo[i], self.statespace_hi[i])
+                                   for i in range(state_dim)])
+
+            # get the nearest neighbor to the random point from our current tree
+            x_near = V[self.find_nearest(V[range(n),:], x_rand),:]
+
+            # get the new point along the vector from x_near to x_rand
+            x_new = self.steer_towards(x_near, x_rand, eps)
+
+            # check that the path between x_near and x_new is collision free
+            if self.is_free_motion(self.obstacles, x_near, x_new):
+                # add the new vertex to our tree
+                V[n,:] = x_new
+
+                # add the path between the next vertex and parent
+                P[n] = np.where((V == x_near).all(axis=1))[0]
+
+                # increment number of states
+                n += 1
+
+                # if our new point is the goal, return our path
+                if (x_new == self.x_goal).all():
+                    # our path is the path from goal to parent iteratively until we're at x_init
+                    path = [self.x_goal]
+                    current = path[-1]
+                    while (current != self.x_init).all():
+                        # get the parent of our point
+                        idx = np.where((V == current).all(axis=1))[0]
+                        parent = V[P[idx]][0]
+                        # add the parent to our path
+                        path.append(parent)
+                        # move along the backwards path to the next point
+                        current = path[-1]
+
+                    # once our current point is the initial, flip the path to get our solution
+                    self.path = list(reversed(path))
+                    success = True
+
+                    # stop iteration
+                    break
+
         ########## Code ends here ##########
 
         plt.figure()
@@ -142,6 +192,29 @@ class RRT(object):
             None, but should modify self.path
         """
         ########## Code starts here ##########
+        success = False
+
+        # start loop
+        while not success:
+            success = True
+            # iterate through the path
+            for x in self.path:
+                # skip initial and goal
+                if (x == self.x_init).all() or (x == self.x_goal).all():
+                    continue
+
+                # get the current node's parent and child
+                idx = np.where((self.path == x).all(axis=1))[0]
+                idx = idx[0] # idx comes out of np.where as an array, so I need to extract it again
+                parent = self.path[idx - 1]
+                child = self.path[idx + 1]
+
+                # check if the parent and child can connect collision-free
+                if self.is_free_motion(self.obstacles, parent, child):
+                    # remove the current node from the path
+                    del self.path[idx]
+                    # toggle success so we keep checking for more shortcuts
+                    success = False
         
         ########## Code ends here ##########
 
@@ -154,13 +227,15 @@ class GeometricRRT(RRT):
     def find_nearest(self, V, x):
         ########## Code starts here ##########
         # Hint: This should take one line.
-        
+        # return the min index of the distance array
+        return np.argmin(np.linalg.norm(x - V, axis=1))
         ########## Code ends here ##########
 
     def steer_towards(self, x1, x2, eps):
         ########## Code starts here ##########
         # Hint: This should take one line.
-        
+        # return the next valid point along the vector
+        return x2 if np.linalg.norm(x2-x1) < eps else x1 + eps * ((x2-x1) / np.linalg.norm(x2-x1))
         ########## Code ends here ##########
 
     def is_free_motion(self, obstacles, x1, x2):
@@ -196,7 +271,9 @@ class DubinsRRT(RRT):
     def find_nearest(self, V, x):
         from dubins import path_length
         ########## Code starts here ##########
-        
+        # apply path_length to each element and find minimum
+        path_length_vec = np.array([path_length(V[i,:], x, self.turning_radius) for i in range(np.shape(V)[0])])
+        return np.argmin(path_length_vec)
         ########## Code ends here ##########
 
     def steer_towards(self, x1, x2, eps):
@@ -209,8 +286,15 @@ class DubinsRRT(RRT):
         dubins.path_sample might return a point that can't quite get to in
         distance eps (using self.turning_radius) due to numerical precision
         issues.
-        """
-        
+       """
+        from dubins import path_length, path_sample
+        # check if Dubins path length is smaller than eps
+        if path_length(x1,x2,self.turning_radius) < eps:
+            return x2
+        else:
+            # otherwise, get the path_sample at epsilon distance away (second element of first column from path_sample)
+            pts = path_sample(x1, x2, 1.002*self.turning_radius, eps)[0]
+            return np.asarray(pts[1])
         ########## Code ends here ##########
 
     def is_free_motion(self, obstacles, x1, x2, resolution = np.pi/6):

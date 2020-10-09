@@ -58,8 +58,26 @@ class TrajectoryTracker:
         x_d, xd_d, xdd_d, y_d, yd_d, ydd_d = self.get_desired_state(t)
 
         ########## Code starts here ##########
-        V = 0
-        om = 0
+        # calc x dot and y dot
+        xd = self.V_prev * np.cos(th)
+        yd = self.V_prev * np.sin(th)
+
+        # create u1 and u2 equations
+        u1 = xdd_d + self.kpx * (x_d - x) + self.kdx * (xd_d - xd)
+        u2 = ydd_d + self.kpy * (y_d - y) + self.kdy * (yd_d - yd)
+
+        # check if we need to "reset" V to avoid singularity
+        V_for_J_mat = self.V_prev if self.V_prev > V_PREV_THRES else np.sqrt(xd_d ** 2 + yd_d **2)
+
+        # create J matrix
+        J = np.array([[np.cos(th), -V_for_J_mat * np.sin(th)], [np.sin(th), V_for_J_mat * np.cos(th)]])
+
+        # calculate alpha and omega from the controls equations
+        [alpha, om] = np.dot(np.linalg.inv(J), np.array([u1, u2]))
+
+        # get V
+        V = self.V_prev + alpha * (t - self.t_prev)
+
         ########## Code ends here ##########
 
         # apply control limits

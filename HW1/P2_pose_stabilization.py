@@ -1,5 +1,5 @@
 import numpy as np
-from utils import wrapToPi
+from utils import wrapToPi, simulate_car_dyn
 
 # command zero velocities once we are this close to the goal
 RHO_THRES = 0.05
@@ -34,6 +34,22 @@ class PoseController:
         may also be useful, look up its documentation
         """
         ########## Code starts here ##########
+        # get differences in position
+        x_diff = self.x_g - x
+        y_diff = self.y_g - y
+
+        # calculate polar coordinates
+        rho = np.sqrt(x_diff**2 + y_diff**2)
+        alpha = wrapToPi(np.arctan2(y_diff, x_diff) - th)
+        delta = wrapToPi(alpha + th - self.th_g)
+
+        # calculate the controls (keeping in mind thresholds)
+        if rho < RHO_THRES and alpha < ALPHA_THRES and delta < DELTA_THRES:
+            V = 0
+            om = 0
+        else:
+            V = self.k1 * rho * np.cos(alpha)
+            om = self.k2 * alpha + self.k1 * np.sinc(alpha / np.pi) * np.cos(alpha) * (alpha + self.k3 * delta)
         
         ########## Code ends here ##########
 
@@ -42,3 +58,4 @@ class PoseController:
         om = np.clip(om, -self.om_max, self.om_max)
 
         return V, om
+

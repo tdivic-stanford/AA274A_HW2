@@ -89,6 +89,29 @@ class RRTConnect(object):
         """
         raise NotImplementedError("steer_towards_backward must be overriden by a subclass of RRTConnect")
 
+    def reconstruct_path(self, start_point, end_point, V, P, is_bw_tree=False):
+        """
+        Function to reconstruct a path from a tree V and parent nodes P
+        """
+        # create path that starts at the end_point
+        path = [end_point]
+        current = path[-1]
+        # loop until we get to the start_point
+        while (current != start_point).all():
+            # get the parent of our point
+            idx = np.where((V == current).all(axis=1))[0]
+            parent = V[P[idx]][0]
+            # add the parent to our path
+            path.append(parent)
+            # move along the backwards path to the next point
+            current = path[-1]
+
+        # if we are reconstructing the forward tree, we need to flip our path
+        if not is_bw_tree:
+            path = list(reversed(path))
+
+        return path
+
     def solve(self, eps, max_iters = 1000):
         """
         Uses RRT-Connect to perform bidirectional RRT, with a forward tree
@@ -121,7 +144,7 @@ class RRTConnect(object):
 
         ## Intermediate Outputs
         # You must update and/or populate:
-        #    - V_fw, V_bw, P_fw, P_bw, n_fw, n_bw: the represention of the
+        #    - V_fw, V_bw, P_fw, P_bw, n_fw, n_bw: the representation of the
         #           planning trees
         #    - success: whether or not you've found a solution within max_iters
         #           RRT-Connect iterations
@@ -132,8 +155,136 @@ class RRTConnect(object):
         # Hint: Use your implementation of RRT as a reference
 
         ########## Code starts here ##########
-        
+        # initialize the forward and reverse trees
+        V_fw[0,:] = self.x_init
+        V_bw[0,:] = self.x_goal
 
+        # start iterations
+        for k in range(max_iters):
+            # create x rand depending on state_dim
+            x_rand = np.array([np.random.uniform(self.statespace_lo[i], self.statespace_hi[i])
+                               for i in range(state_dim)])
+
+            # find the nearest forward neighbor
+            x_near = V_fw[self.find_nearest_forward(V_fw[range(n_fw),:], x_rand),:]
+
+            # get new point in the forward direction
+            x_new = self.steer_towards_forward(x_near, x_rand, eps)
+
+            # check that the path between x_near and x_new is collision free
+            if self.is_free_motion(self.obstacles, x_near, x_new):
+                # add the new vertex to the forward tree
+                V_fw[n_fw,:] = x_new
+
+                # add the edge between the next vertex and parent
+                P_fw[n_fw] = np.where((V_fw[range(n_fw),:] == x_near).all(axis=1))[0]
+
+                # increment number of states
+                n_fw += 1
+
+                # get the x_connect point by finding the nearest backward neighbor to x_new
+                x_connect = V_bw[self.find_nearest_backward(V_bw[range(n_bw),:], x_new),:]
+
+                while True:
+                    # get a point along the backwards tree
+                    x_new_connect = self.steer_towards_backward(x_new, x_connect, eps)
+
+                    # check if this new path is collision free
+                    if self.is_free_motion(self.obstacles, x_new_connect, x_connect):
+                        # if free, add this point to the backward tree
+                        V_bw[n_bw,:] = x_new_connect
+
+                        # add the edge between this vertex and its parent
+                        P_bw[n_bw] = np.where((V_bw[range(n_bw),:] == x_connect).all(axis=1))[0]
+
+                        # increment number of states
+                        n_bw += 1
+
+                        # if we've joined with the forward path, reconstruct the path
+                        if (x_new_connect == x_new).all():
+                            # reconstruct the forward tree that goes from x_init to x_new
+                            fw_path = self.reconstruct_path(self.x_init, x_new, V_fw, P_fw, is_bw_tree=False)
+                            # reconstruct the backward tree starting from x_goal to x_new_connect
+                            bw_path = self.reconstruct_path(self.x_goal, x_new_connect, V_bw, P_bw, is_bw_tree=True)
+
+                            # combine the two paths
+                            self.path = fw_path + bw_path
+                            success = True
+                            break
+
+                        # make x_connect equal to the x_new_connect
+                        x_connect = x_new_connect
+
+                    # if this path creates a collision, break
+                    else:
+                        break
+
+            # end the iteration if we've successfully created a path
+            if success:
+                break
+
+            # now move in the backwards tree
+            # create a new x_rand
+            x_rand = np.array([np.random.uniform(self.statespace_lo[i], self.statespace_hi[i])
+                               for i in range(state_dim)])
+
+            # find the nearest backward neighbor
+            x_near = V_bw[self.find_nearest_backward(V_bw[range(n_bw), :], x_rand), :]
+
+            # get new point in the backward direction
+            x_new = self.steer_towards_backward(x_rand, x_near, eps)
+
+            # check that the path between x_near and x_new is collision free
+            if self.is_free_motion(self.obstacles, x_near, x_new):
+                # add the new vertex to the backward tree
+                V_bw[n_bw, :] = x_new
+
+                # add the edge between the next vertex and parent
+                P_bw[n_bw] = np.where((V_bw[range(n_bw),:] == x_near).all(axis=1))[0]
+
+                # increment number of states
+                n_bw += 1
+
+                # get the x_connect point by finding the nearest forward neighbor to x_new
+                x_connect = V_fw[self.find_nearest_forward(V_fw[range(n_fw), :], x_new), :]
+
+                while True:
+                    # get a point along the forward tree
+                    x_new_connect = self.steer_towards_forward(x_connect, x_new, eps)
+
+                    # check if this new path is collision free
+                    if self.is_free_motion(self.obstacles, x_new_connect, x_connect):
+                        # if free, add this point to the forward tree
+                        V_fw[n_fw, :] = x_new_connect
+
+                        # add the edge between this vertex and its parent
+                        P_fw[n_fw] = np.where((V_fw[range(n_fw),:] == x_connect).all(axis=1))[0]
+
+                        # increment number of states
+                        n_fw += 1
+
+                        # if we've joined with the backward path, reconstruct the path
+                        if (x_new_connect == x_new).all():
+                            # reconstruct the forward tree that goes from x_init to x_new_connect
+                            fw_path = self.reconstruct_path(self.x_init, x_new_connect, V_fw, P_fw, is_bw_tree=False)
+                            # reconstruct the backward tree starting from x_goal to x_new
+                            bw_path = self.reconstruct_path(self.x_goal, x_new, V_bw, P_bw, is_bw_tree=True)
+
+                            # combine the two paths
+                            self.path = fw_path + bw_path
+                            success = True
+                            break
+
+                        # make x_connect equal to the x_new_connect
+                        x_connect = x_new_connect
+
+                    # if this path creates a collision, break
+                    else:
+                        break
+
+            # end the iteration if we've successfully created a path
+            if success:
+                break
         ########## Code ends here ##########
 
         plt.figure()
@@ -166,7 +317,7 @@ class GeometricRRTConnect(RRTConnect):
     def find_nearest_forward(self, V, x):
         ########## Code starts here ##########
         # Hint: This should take one line.
-        
+        return np.argmin(np.linalg.norm(x - V, axis=1))
         ########## Code ends here ##########
 
     def find_nearest_backward(self, V, x):
@@ -175,7 +326,8 @@ class GeometricRRTConnect(RRTConnect):
     def steer_towards_forward(self, x1, x2, eps):
         ########## Code starts here ##########
         # Hint: This should take one line.
-        
+        # return the next valid point along the vector
+        return x2 if np.linalg.norm(x2 - x1) < eps else x1 + eps * ((x2 - x1) / np.linalg.norm(x2 - x1))
         ########## Code ends here ##########
 
     def steer_towards_backward(self, x1, x2, eps):
@@ -228,23 +380,49 @@ class DubinsRRTConnect(RRTConnect):
         return np.array((x[0], x[1], theta_new))
 
     def find_nearest_forward(self, V, x):
+        from dubins import path_length
         ########## Code starts here ##########
-        
+        # apply path_length to each element and find minimum
+        path_length_vec = np.array([path_length(V[i, :], x, self.turning_radius) for i in range(np.shape(V)[0])])
+        return np.argmin(path_length_vec)
         ########## Code ends here ##########
 
     def find_nearest_backward(self, V, x):
         ########## Code starts here ##########
-        
+        # flip the heading of every point in V
+        V_flipped = np.array([self.reverse_heading(V[i,:]) for i in range(np.shape(V)[0])])
+
+        # flip heading of the input point
+        x_flipped = self.reverse_heading(x)
+
+        # now just call nearest forward to get the smallest path length
+        return self.find_nearest_forward(V_flipped, x_flipped)
+
         ########## Code ends here ##########
 
     def steer_towards_forward(self, x1, x2, eps):
-        ########## Code starts here ##########
-        
+        from dubins import path_length, path_sample
+        # check if Dubins path length is smaller than eps
+        if path_length(x1, x2, self.turning_radius) < eps:
+            return x2
+        else:
+            # otherwise, get the path_sample at epsilon distance away (second element of first column from path_sample)
+            pts = path_sample(x1, x2, 1.002 * self.turning_radius, eps)[0]
+            return np.asarray(pts[1])
         ########## Code ends here ##########
 
     def steer_towards_backward(self, x1, x2, eps):
         ########## Code starts here ##########
-        
+        # flip the heading of x1 and x2
+        x1_flipped = self.reverse_heading(x1)
+        x2_flipped = self.reverse_heading(x2)
+
+        # treat this as a steer forward problem going from x2 to x1
+        next_point = self.steer_towards_forward(x2_flipped, x1_flipped, eps)
+
+        # flip the heading on the resulting point and return
+        return self.reverse_heading(next_point)
+
         ########## Code ends here ##########
 
     def is_free_motion(self, obstacles, x1, x2, resolution = np.pi/6):
