@@ -293,7 +293,7 @@ class DubinsRRT(RRT):
             return x2
         else:
             # otherwise, get the path_sample at epsilon distance away (second element of first column from path_sample)
-            pts = path_sample(x1, x2, 1.002*self.turning_radius, eps)[0]
+            pts = path_sample(x1, x2, 1.001*self.turning_radius, eps)[0]
             return np.asarray(pts[1])
         ########## Code ends here ##########
 
